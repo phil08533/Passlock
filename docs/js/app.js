@@ -390,6 +390,131 @@ const App = (() => {
     }
   }
 
+  /* ─── EXPORT BACKUP ─── */
+  async function exportBackup() {
+    showLoading('Preparing backup…');
+    try {
+      const record = await Storage.load();
+      if (!record) { toast('No vault to export.'); return; }
+
+      // Strip IndexedDB internal key before export
+      const { id: _id, ...exportData } = record;
+      exportData.exportedAt  = new Date().toISOString();
+      exportData.appVersion  = 1;
+
+      const json = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const date = new Date().toISOString().split('T')[0];
+
+      const a = document.createElement('a');
+      a.href     = url;
+      a.download = `passlock-backup-${date}.passlock`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast('Backup downloaded! Save it somewhere safe.', 3500);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  /* ─── IMPORT HELPERS ─── */
+  function validateBackupRecord(record) {
+    if (!record || typeof record !== 'object')           throw new Error('Not a valid backup file.');
+    if (!record.version || !record.salt)                throw new Error('Missing vault metadata.');
+    if (!record.wrappedKey)                              throw new Error('Missing encryption key data.');
+    if (!record.vaultIv || !record.vaultData)           throw new Error('Missing encrypted vault data.');
+  }
+
+  async function readFileAsJSON(file) {
+    const text = await file.text();
+    try { return JSON.parse(text); }
+    catch { throw new Error('File is not valid JSON.'); }
+  }
+
+  async function verifyAndLoad(record, password) {
+    const salt        = Crypto.fromB64(record.salt);
+    const wrappingKey = await Crypto.deriveWrappingKey(password, salt);
+    const key         = await Crypto.unwrapVaultKey(record.wrappedKey, wrappingKey);
+    const loaded      = await Crypto.decrypt({ iv: record.vaultIv, data: record.vaultData }, key);
+    return { key, entries: loaded };
+  }
+
+  /* ─── IMPORT FROM AUTH SCREEN (no existing vault) ─── */
+  async function importFromAuth(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    let record;
+    try {
+      record = await readFileAsJSON(file);
+      validateBackupRecord(record);
+    } catch (e) {
+      alert(e.message); return;
+    }
+
+    const pw = prompt('Enter the master password for this backup:');
+    if (!pw) return;
+
+    showLoading('Restoring backup…');
+    try {
+      const { key, entries: loaded } = await verifyAndLoad(record, pw);
+      // Save backup as the new vault
+      const { id: _id, exportedAt: _e, appVersion: _a, ...vaultRecord } = record;
+      await Storage.save(vaultRecord);
+      vaultKey = key;
+      entries  = loaded;
+      showScreen('vault');
+      renderEntries();
+      resetIdle();
+      toast(`Restored ${loaded.length} password(s) from backup!`, 3000);
+    } catch {
+      alert('Incorrect password for this backup, or the file is corrupted.');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  /* ─── IMPORT FROM SETTINGS (overwrite existing vault) ─── */
+  async function importFromSettings(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    let record;
+    try {
+      record = await readFileAsJSON(file);
+      validateBackupRecord(record);
+    } catch (e) {
+      setError('settings-error', e.message); return;
+    }
+
+    const pw = prompt('Enter the master password for this backup to verify it:');
+    if (!pw) return;
+
+    if (!confirm('This will REPLACE your current vault with the backup. Are you sure?')) return;
+
+    showLoading('Restoring backup…');
+    try {
+      const { key, entries: loaded } = await verifyAndLoad(record, pw);
+      const { id: _id, exportedAt: _e, appVersion: _a, ...vaultRecord } = record;
+      await Storage.save(vaultRecord);
+      vaultKey = key;
+      entries  = loaded;
+      closeSettings();
+      renderEntries($('search').value);
+      toast(`Restored ${loaded.length} password(s) from backup!`, 3000);
+    } catch {
+      setError('settings-error', 'Incorrect password or corrupted backup file.');
+    } finally {
+      hideLoading();
+    }
+  }
+
   /* ─── Start ─── */
   document.addEventListener('DOMContentLoaded', init);
 
@@ -397,5 +522,6 @@ const App = (() => {
     createVault, unlock, lock, search,
     openAddEntry, closeEntry, saveEntry, fillGeneratedPassword,
     showSettings, closeSettings, changePassword,
+    exportBackup, importFromAuth, importFromSettings,
   };
 })();

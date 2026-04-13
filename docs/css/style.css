@@ -266,6 +266,12 @@ textarea { resize: vertical; min-height: 72px; }
 .info-list { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .info-list li { font-size: 13px; color: var(--text-2); }
 
+/* ═══ DIVIDER ═══ */
+.divider-text {
+  text-align: center; font-size: 13px; color: var(--text-2);
+  margin: 4px 0;
+}
+
 /* ═══ MESSAGES ═══ */
 .error-msg { font-size: 13px; color: var(--error); min-height: 18px; }
 

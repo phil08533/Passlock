@@ -84,6 +84,14 @@
       <button id="auth-btn" class="btn-primary" onclick="App.unlock()">
         Unlock Vault
       </button>
+
+      <div class="divider-text">— or —</div>
+
+      <label class="btn-outline" style="text-align:center;cursor:pointer;display:block">
+        📂 Restore from Backup
+        <input type="file" id="auth-import-input" accept=".passlock,.json" style="display:none"
+               onchange="App.importFromAuth(this)">
+      </label>
     </div>
   </div>
 </div>
@@ -183,6 +191,22 @@
         </div>
         <div id="settings-error" class="error-msg"></div>
         <button class="btn-primary" onclick="App.changePassword()">Change Password</button>
+      </div>
+
+      <!-- Backup & Restore -->
+      <div class="settings-section">
+        <h3>Backup &amp; Restore</h3>
+        <p style="font-size:13px;color:var(--text-2);line-height:1.5">
+          Your backup is <strong>already encrypted</strong> — safe to save on iCloud, Google Drive, or email to yourself.
+          You need your master password to restore it.
+        </p>
+        <button class="btn-primary" onclick="App.exportBackup()">⬇ Export Encrypted Backup</button>
+
+        <label class="btn-outline" style="text-align:center;cursor:pointer;display:block;margin-top:4px">
+          ⬆ Import / Restore Backup
+          <input type="file" id="settings-import-input" accept=".passlock,.json" style="display:none"
+                 onchange="App.importFromSettings(this)">
+        </label>
       </div>
 
       <div class="info-card">
