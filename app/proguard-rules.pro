@@ -1,0 +1,4 @@
+-keep class com.passlock.data.** { *; }
+-keep class com.passlock.crypto.WrappedKey { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
