@@ -1,0 +1,18 @@
+{
+  "name": "Passlock",
+  "short_name": "Passlock",
+  "description": "Offline encrypted password vault",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16161e",
+  "theme_color": "#5B67CA",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
