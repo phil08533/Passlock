@@ -1,121 +1,173 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Passlock</title>
-
-  <!-- PWA -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#5B67CA">
-
-  <!-- iOS PWA -->
+  <meta name="theme-color" content="#5B67CA" id="theme-meta">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Passlock">
   <link rel="apple-touch-icon" href="icons/icon.svg">
-
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<!-- ═══════════════════ TOAST ═══════════════════ -->
 <div id="toast" class="toast"></div>
 
-<!-- ═══════════════════ SCREEN: SETUP ═══════════════════ -->
+<!-- ══════════════ SCREEN: SETUP ══════════════ -->
 <div id="screen-setup" class="screen">
   <div class="screen-inner">
     <div class="logo-wrap">
       <span class="logo-icon">🔒</span>
       <h1 class="app-name">Passlock</h1>
-      <p class="tagline">Your offline password vault</p>
+      <p class="tagline">Your offline vault</p>
     </div>
-
     <div class="card">
-      <p class="card-hint">
-        Choose a strong master password. It encrypts everything — if you forget it, your data
-        <strong>cannot be recovered</strong>.
-      </p>
-
+      <p class="card-hint">Choose a strong master password. If you forget it, your data <strong>cannot be recovered</strong>.</p>
       <div class="field-group">
-        <label for="setup-pw">Master Password <span class="req">*</span></label>
+        <label>Master Password <span class="req">*</span></label>
         <div class="input-row">
           <input type="password" id="setup-pw" placeholder="At least 8 characters" autocomplete="new-password">
-          <button class="eye-btn" data-for="setup-pw" title="Show/hide">👁</button>
+          <button class="eye-btn" data-for="setup-pw">👁</button>
         </div>
       </div>
-
       <div class="field-group">
-        <label for="setup-confirm">Confirm Password <span class="req">*</span></label>
+        <label>Confirm Password <span class="req">*</span></label>
         <div class="input-row">
           <input type="password" id="setup-confirm" placeholder="Repeat password" autocomplete="new-password">
         </div>
       </div>
-
+      <div class="field-group">
+        <label>PIN Code (optional)</label>
+        <div class="input-row">
+          <input type="number" id="setup-pin" placeholder="4–6 digits for quick unlock" min="0" inputmode="numeric" autocomplete="off">
+        </div>
+        <p style="font-size:12px;color:var(--text-2);margin-top:4px">Leave blank to skip. You can add a PIN later in Settings.</p>
+      </div>
       <div id="setup-error" class="error-msg"></div>
-
-      <button id="setup-btn" class="btn-primary" onclick="App.createVault()">
-        Create Vault
-      </button>
+      <button class="btn-primary" onclick="App.createVault()">Create Vault</button>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════ SCREEN: AUTH ═══════════════════ -->
+<!-- ══════════════ SCREEN: AUTH ══════════════ -->
 <div id="screen-auth" class="screen hidden">
   <div class="screen-inner">
     <div class="logo-wrap">
       <span class="logo-icon">🔒</span>
       <h1 class="app-name">Passlock</h1>
-      <p class="tagline">Enter your master password to unlock</p>
     </div>
-
     <div class="card">
-      <div class="field-group">
-        <label for="auth-pw">Master Password</label>
-        <div class="input-row">
-          <input type="password" id="auth-pw" placeholder="Your password" autocomplete="current-password">
-          <button class="eye-btn" data-for="auth-pw" title="Show/hide">👁</button>
+      <!-- PIN pad (shown when PIN is set) -->
+      <div id="pin-section" class="hidden">
+        <div class="pin-display" id="pin-display">••••</div>
+        <div class="pin-pad">
+          <button class="pin-btn" onclick="App.pinDigit('1')">1</button>
+          <button class="pin-btn" onclick="App.pinDigit('2')">2</button>
+          <button class="pin-btn" onclick="App.pinDigit('3')">3</button>
+          <button class="pin-btn" onclick="App.pinDigit('4')">4</button>
+          <button class="pin-btn" onclick="App.pinDigit('5')">5</button>
+          <button class="pin-btn" onclick="App.pinDigit('6')">6</button>
+          <button class="pin-btn" onclick="App.pinDigit('7')">7</button>
+          <button class="pin-btn" onclick="App.pinDigit('8')">8</button>
+          <button class="pin-btn" onclick="App.pinDigit('9')">9</button>
+          <button class="pin-btn pin-clear" onclick="App.pinClear()">⌫</button>
+          <button class="pin-btn" onclick="App.pinDigit('0')">0</button>
+          <button class="pin-btn pin-ok" onclick="App.pinSubmit()">✓</button>
+        </div>
+        <button class="btn-link" onclick="App.showPasswordForm()">Use password instead</button>
+        <div id="pin-error" class="error-msg" style="text-align:center"></div>
+      </div>
+      <!-- Password form -->
+      <div id="pw-section">
+        <div class="field-group">
+          <label>Master Password</label>
+          <div class="input-row">
+            <input type="password" id="auth-pw" placeholder="Your password" autocomplete="current-password">
+            <button class="eye-btn" data-for="auth-pw">👁</button>
+          </div>
+        </div>
+        <div id="auth-error" class="error-msg"></div>
+        <button class="btn-primary" onclick="App.unlock()">Unlock Vault</button>
+        <div id="switch-to-pin" class="hidden">
+          <button class="btn-link" onclick="App.showPinForm()">Use PIN instead</button>
         </div>
       </div>
-
-      <div id="auth-error" class="error-msg"></div>
-
-      <button id="auth-btn" class="btn-primary" onclick="App.unlock()">
-        Unlock Vault
-      </button>
+      <div class="divider-text">— or —</div>
+      <label class="btn-outline" style="text-align:center;cursor:pointer;display:block">
+        📂 Restore from Backup
+        <input type="file" id="auth-import-input" accept=".passlock,.json" style="display:none" onchange="App.importFromAuth(this)">
+      </label>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════ SCREEN: VAULT ═══════════════════ -->
+<!-- ══════════════ SCREEN: VAULT ══════════════ -->
 <div id="screen-vault" class="screen hidden">
-
   <header class="vault-header">
     <span class="vault-title">🔒 Passlock</span>
     <div class="header-btns">
-      <button class="hdr-btn" onclick="App.showSettings()" title="Settings">⚙️</button>
-      <button class="hdr-btn" onclick="App.lock()" title="Lock vault">🔐</button>
+      <button class="hdr-btn" onclick="App.showSettings()">⚙️</button>
+      <button class="hdr-btn" onclick="App.lock()">🔐</button>
     </div>
   </header>
 
-  <div class="search-wrap">
-    <input type="search" id="search" placeholder="Search passwords…" oninput="App.search(this.value)">
+  <!-- Bottom Tab Bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-passwords" onclick="App.switchTab('passwords')">
+      <span>🔑</span><span class="tab-label">Passwords</span>
+    </button>
+    <button class="tab-btn" id="tab-files" onclick="App.switchTab('files')">
+      <span>📁</span><span class="tab-label">File Vault</span>
+    </button>
   </div>
 
-  <div id="entry-list" class="entry-list"></div>
-
-  <div id="empty-state" class="empty-state hidden">
-    <span class="empty-icon">🔑</span>
-    <p>Your vault is empty</p>
-    <p class="empty-sub">Tap + to add your first password</p>
+  <!-- Passwords tab -->
+  <div id="tab-content-passwords">
+    <div class="search-wrap">
+      <input type="search" id="search" placeholder="Search passwords…" oninput="App.search(this.value)">
+    </div>
+    <div id="entry-list" class="entry-list"></div>
+    <div id="empty-state" class="empty-state hidden">
+      <span class="empty-icon">🔑</span>
+      <p>Your vault is empty</p>
+      <p class="empty-sub">Tap + to add your first password</p>
+    </div>
+    <button class="fab" onclick="App.openAddEntry()">+</button>
   </div>
 
-  <button class="fab" onclick="App.openAddEntry()" title="Add password">+</button>
-
+  <!-- Files tab -->
+  <div id="tab-content-files" class="hidden">
+    <div class="file-vault-wrap">
+      <div class="file-vault-card">
+        <div class="fv-icon">🔒</div>
+        <h3>Lock Files</h3>
+        <p>Select any files — images, videos, documents — and encrypt them into a single <code>.vault</code> file you can store anywhere.</p>
+        <label class="btn-primary" style="cursor:pointer;display:block;text-align:center">
+          Choose Files to Encrypt
+          <input type="file" id="lock-file-input" multiple style="display:none" onchange="App.lockFiles(this)">
+        </label>
+      </div>
+      <div class="file-vault-card">
+        <div class="fv-icon">🔓</div>
+        <h3>Unlock Files</h3>
+        <p>Pick a <code>.vault</code> file created by Passlock and decrypt it back to the original files.</p>
+        <label class="btn-outline" style="cursor:pointer;display:block;text-align:center">
+          Choose .vault File to Decrypt
+          <input type="file" id="unlock-file-input" accept=".vault,.passlock-vault" style="display:none" onchange="App.unlockFiles(this)">
+        </label>
+      </div>
+      <div id="file-progress" class="hidden" style="text-align:center;padding:16px">
+        <div class="spinner" style="margin:0 auto 12px"></div>
+        <p id="file-progress-msg" style="font-size:14px;color:var(--text-2)">Working…</p>
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- ═══════════════════ MODAL: ADD / EDIT ENTRY ═══════════════════ -->
+<!-- ══════════════ MODAL: ADD/EDIT ENTRY ══════════════ -->
 <div id="modal-entry" class="modal hidden">
   <div class="modal-backdrop" onclick="App.closeEntry()"></div>
   <div class="modal-sheet">
@@ -126,30 +178,28 @@
     </div>
     <div class="modal-body">
       <div class="field-group">
-        <label for="e-title">Title <span class="req">*</span></label>
+        <label>Title <span class="req">*</span></label>
         <input type="text" id="e-title" placeholder="e.g. Google" autocomplete="off">
       </div>
       <div class="field-group">
-        <label for="e-username">Username / Email</label>
+        <label>Username / Email</label>
         <input type="text" id="e-username" placeholder="user@example.com" autocomplete="off">
       </div>
       <div class="field-group">
-        <label for="e-password">Password <span class="req">*</span></label>
+        <label>Password <span class="req">*</span></label>
         <div class="input-row">
           <input type="password" id="e-password" placeholder="Password" autocomplete="new-password">
           <button class="eye-btn" data-for="e-password">👁</button>
         </div>
-        <button class="btn-outline small" onclick="App.fillGeneratedPassword()" style="margin-top:8px">
-          ⚡ Generate Strong Password
-        </button>
+        <button class="btn-outline small" onclick="App.fillGeneratedPassword()" style="margin-top:8px">⚡ Generate Strong Password</button>
       </div>
       <div class="field-group">
-        <label for="e-url">Website URL</label>
+        <label>Website URL</label>
         <input type="url" id="e-url" placeholder="https://example.com">
       </div>
       <div class="field-group">
-        <label for="e-notes">Notes</label>
-        <textarea id="e-notes" placeholder="Optional notes…" rows="3"></textarea>
+        <label>Notes</label>
+        <textarea id="e-notes" rows="3" placeholder="Optional notes…"></textarea>
       </div>
       <div id="entry-error" class="error-msg"></div>
       <button class="btn-primary" onclick="App.saveEntry()">Save Entry</button>
@@ -157,7 +207,7 @@
   </div>
 </div>
 
-<!-- ═══════════════════ MODAL: SETTINGS ═══════════════════ -->
+<!-- ══════════════ MODAL: SETTINGS ══════════════ -->
 <div id="modal-settings" class="modal hidden">
   <div class="modal-backdrop" onclick="App.closeSettings()"></div>
   <div class="modal-sheet">
@@ -167,40 +217,88 @@
       <button class="close-btn" onclick="App.closeSettings()">✕</button>
     </div>
     <div class="modal-body">
+
+      <!-- Theme picker -->
       <div class="settings-section">
-        <h3>Change Master Password</h3>
+        <h3>🎨 Theme</h3>
+        <div class="theme-picker">
+          <button class="theme-swatch" data-theme="dark"     onclick="App.setTheme('dark')"     title="Dark"><span>🌑</span>Dark</button>
+          <button class="theme-swatch" data-theme="light"    onclick="App.setTheme('light')"    title="Light"><span>☀️</span>Light</button>
+          <button class="theme-swatch" data-theme="midnight" onclick="App.setTheme('midnight')" title="Midnight"><span>🌃</span>Midnight</button>
+          <button class="theme-swatch" data-theme="forest"   onclick="App.setTheme('forest')"   title="Forest"><span>🌲</span>Forest</button>
+          <button class="theme-swatch" data-theme="sunset"   onclick="App.setTheme('sunset')"   title="Sunset"><span>🌅</span>Sunset</button>
+        </div>
+      </div>
+
+      <!-- PIN -->
+      <div class="settings-section">
+        <h3>🔢 PIN Code</h3>
+        <div id="pin-status-text" style="font-size:13px;color:var(--text-2);margin-bottom:8px"></div>
+        <div id="pin-setup-form" class="hidden">
+          <div class="field-group">
+            <label>New PIN (4–6 digits)</label>
+            <input type="number" id="new-pin" placeholder="e.g. 1234" inputmode="numeric" min="0" autocomplete="off">
+          </div>
+          <div class="field-group">
+            <label>Confirm PIN</label>
+            <input type="number" id="confirm-pin" placeholder="Repeat PIN" inputmode="numeric" min="0" autocomplete="off">
+          </div>
+          <div id="pin-setup-error" class="error-msg"></div>
+          <button class="btn-primary" onclick="App.savePin()">Set PIN</button>
+          <button class="btn-link" onclick="App.cancelPinSetup()">Cancel</button>
+        </div>
+        <div id="pin-action-btns">
+          <button class="btn-outline" id="btn-toggle-pin" onclick="App.togglePinSetup()">Set PIN</button>
+        </div>
+      </div>
+
+      <!-- Change password -->
+      <div class="settings-section">
+        <h3>🔑 Change Master Password</h3>
         <div class="field-group">
-          <label for="s-current">Current Password</label>
+          <label>Current Password</label>
           <input type="password" id="s-current" autocomplete="current-password">
         </div>
         <div class="field-group">
-          <label for="s-new">New Password (min 8 chars)</label>
+          <label>New Password (min 8 chars)</label>
           <input type="password" id="s-new" autocomplete="new-password">
         </div>
         <div class="field-group">
-          <label for="s-confirm">Confirm New Password</label>
+          <label>Confirm New Password</label>
           <input type="password" id="s-confirm" autocomplete="new-password">
         </div>
         <div id="settings-error" class="error-msg"></div>
         <button class="btn-primary" onclick="App.changePassword()">Change Password</button>
       </div>
 
+      <!-- Backup -->
+      <div class="settings-section">
+        <h3>💾 Backup &amp; Restore</h3>
+        <p style="font-size:13px;color:var(--text-2);line-height:1.5;margin-bottom:8px">Backup is encrypted — safe to store on iCloud, Drive, or email.</p>
+        <button class="btn-primary" onclick="App.exportBackup()" style="margin-bottom:8px">⬇ Export Encrypted Backup</button>
+        <label class="btn-outline" style="text-align:center;cursor:pointer;display:block">
+          ⬆ Import / Restore Backup
+          <input type="file" id="settings-import-input" accept=".passlock,.json" style="display:none" onchange="App.importFromSettings(this)">
+        </label>
+      </div>
+
+      <!-- Security info -->
       <div class="info-card">
-        <h3>🛡️ Security Info</h3>
+        <h3>🛡️ Security</h3>
         <ul class="info-list">
           <li>AES-256-GCM encryption</li>
-          <li>PBKDF2 key derivation (310,000 rounds)</li>
+          <li>PBKDF2 (310,000 rounds for password; 100,000 for PIN)</li>
           <li>100% offline — zero network requests</li>
-          <li>Data stored only on this device</li>
           <li>Auto-locks after 5 min idle</li>
           <li>Clipboard clears after 30 seconds</li>
         </ul>
       </div>
+
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════ LOADING OVERLAY ═══════════════════ -->
+<!-- ══════════════ LOADING ══════════════ -->
 <div id="loading" class="loading-overlay hidden">
   <div class="spinner"></div>
   <p id="loading-msg">Working…</p>

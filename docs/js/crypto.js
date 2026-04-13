@@ -2,18 +2,17 @@
 
 /**
  * Passlock Crypto — Web Crypto API wrappers.
- * AES-256-GCM + PBKDF2-SHA256 (310,000 rounds).
+ * AES-256-GCM + PBKDF2-SHA256.
  * Nothing here contacts the network.
  */
 const Crypto = (() => {
 
-  const PBKDF2_ITERATIONS = 310_000;
+  const PBKDF2_ROUNDS_PASSWORD = 310_000;
+  const PBKDF2_ROUNDS_PIN      = 100_000;
   const KEY_LEN = 256;
 
-  /** Encode string to Uint8Array */
   const enc = str => new TextEncoder().encode(str);
 
-  /** Uint8Array → base64 string */
   function toB64(buf) {
     const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     let bin = '';
@@ -21,7 +20,6 @@ const Crypto = (() => {
     return btoa(bin);
   }
 
-  /** base64 string → Uint8Array */
   function fromB64(b64) {
     const bin = atob(b64);
     const out = new Uint8Array(bin.length);
@@ -29,77 +27,99 @@ const Crypto = (() => {
     return out;
   }
 
-  /** Random bytes */
   function randomBytes(n) {
     return crypto.getRandomValues(new Uint8Array(n));
   }
 
-  /**
-   * Derive an AES-KW key from a password using PBKDF2.
-   * Used for wrapping/unwrapping the vault key.
-   */
+  /** Derive an AES-KW wrapping key from a password (310,000 PBKDF2 rounds). */
   async function deriveWrappingKey(password, salt) {
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw', enc(password), 'PBKDF2', false, ['deriveKey']
-    );
+    const km = await crypto.subtle.importKey('raw', enc(password), 'PBKDF2', false, ['deriveKey']);
     return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-      keyMaterial,
+      { name: 'PBKDF2', salt, iterations: PBKDF2_ROUNDS_PASSWORD, hash: 'SHA-256' },
+      km,
       { name: 'AES-KW', length: KEY_LEN },
-      false,
-      ['wrapKey', 'unwrapKey']
+      false, ['wrapKey', 'unwrapKey']
     );
   }
 
-  /** Generate a random AES-256-GCM vault key (extractable for wrapping). */
+  /** Derive an AES-KW wrapping key from a PIN (100,000 PBKDF2 rounds — faster for UX). */
+  async function deriveWrappingKeyFromPin(pin, salt) {
+    const km = await crypto.subtle.importKey('raw', enc(pin), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: PBKDF2_ROUNDS_PIN, hash: 'SHA-256' },
+      km,
+      { name: 'AES-KW', length: KEY_LEN },
+      false, ['wrapKey', 'unwrapKey']
+    );
+  }
+
+  /** Generate a random AES-256-GCM vault key (extractable for key-wrapping). */
   async function generateVaultKey() {
     return crypto.subtle.generateKey(
       { name: 'AES-GCM', length: KEY_LEN },
-      true,
+      true,                           // must be extractable to wrapKey
       ['encrypt', 'decrypt']
     );
   }
 
-  /** Wrap vaultKey with wrappingKey using AES-KW. Returns base64. */
+  /** Wrap vaultKey with wrappingKey (AES-KW). Returns base64 string. */
   async function wrapVaultKey(vaultKey, wrappingKey) {
     const wrapped = await crypto.subtle.wrapKey('raw', vaultKey, wrappingKey, 'AES-KW');
     return toB64(wrapped);
   }
 
   /**
-   * Unwrap the vault key. Returns a non-extractable CryptoKey.
-   * Throws if password is wrong.
+   * Unwrap the vault key. Returns an extractable CryptoKey so it can be
+   * re-wrapped when changing password or adding a PIN.
    */
   async function unwrapVaultKey(wrappedB64, wrappingKey) {
-    const wrapped = fromB64(wrappedB64);
     return crypto.subtle.unwrapKey(
-      'raw', wrapped, wrappingKey,
+      'raw', fromB64(wrappedB64), wrappingKey,
       'AES-KW',
       { name: 'AES-GCM', length: KEY_LEN },
-      false,          // non-extractable after unwrap
+      true,           // extractable — needed for wrapKey (change password / set PIN)
       ['encrypt', 'decrypt']
     );
   }
 
-  /** Encrypt JSON-serialisable data. Returns {iv, data} both base64. */
+  /** Encrypt a JSON-serialisable object. Returns { iv, data } (both base64). */
   async function encrypt(obj, vaultKey) {
     const iv = randomBytes(12);
-    const pt = enc(JSON.stringify(obj));
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, vaultKey, pt);
+    const ct = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv }, vaultKey,
+      enc(JSON.stringify(obj))
+    );
     return { iv: toB64(iv), data: toB64(ct) };
   }
 
-  /** Decrypt {iv, data} (both base64) and parse JSON. */
+  /** Decrypt { iv, data } (both base64) and parse as JSON. */
   async function decrypt({ iv, data }, vaultKey) {
     const pt = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: fromB64(iv) },
-      vaultKey,
-      fromB64(data)
+      { name: 'AES-GCM', iv: fromB64(iv) }, vaultKey, fromB64(data)
     );
     return JSON.parse(new TextDecoder().decode(pt));
   }
 
-  /** Cryptographically secure password generator. */
+  /**
+   * Encrypt raw bytes (ArrayBuffer / TypedArray).
+   * Returns { iv, data } — both base64 — for storage in .vault JSON.
+   */
+  async function encryptBytes(buffer, vaultKey) {
+    const iv = randomBytes(12);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, vaultKey, buffer);
+    return { iv: toB64(iv), data: toB64(ct) };
+  }
+
+  /**
+   * Decrypt a { iv, data } pair (both base64) back to an ArrayBuffer.
+   */
+  async function decryptBytes(iv, data, vaultKey) {
+    return crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fromB64(iv) }, vaultKey, fromB64(data)
+    );
+  }
+
+  /** Cryptographically secure password generator (20 chars). */
   function generatePassword(length = 20) {
     const UPPER   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const LOWER   = 'abcdefghijklmnopqrstuvwxyz';
@@ -110,12 +130,10 @@ const Crypto = (() => {
     const randByte = () => crypto.getRandomValues(new Uint8Array(1))[0];
     const pick = charset => charset[randByte() % charset.length];
 
-    // Guarantee one of each category, fill rest randomly
     const required = [pick(UPPER), pick(LOWER), pick(DIGITS), pick(SYMBOLS)];
     const rest = Array.from({ length: length - 4 }, () => pick(ALL));
     const all = [...required, ...rest];
 
-    // Fisher-Yates shuffle with crypto randomness
     for (let i = all.length - 1; i > 0; i--) {
       const j = randByte() % (i + 1);
       [all[i], all[j]] = [all[j], all[i]];
@@ -125,7 +143,9 @@ const Crypto = (() => {
 
   return {
     toB64, fromB64, randomBytes,
-    deriveWrappingKey, generateVaultKey, wrapVaultKey, unwrapVaultKey,
-    encrypt, decrypt, generatePassword,
+    deriveWrappingKey, deriveWrappingKeyFromPin,
+    generateVaultKey, wrapVaultKey, unwrapVaultKey,
+    encrypt, decrypt, encryptBytes, decryptBytes,
+    generatePassword,
   };
 })();
