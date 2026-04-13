@@ -2,16 +2,20 @@
 
 /**
  * Passlock App — main UI and state logic.
+ * Features: password vault, file vault, 5 themes, PIN unlock, encrypted backup.
  */
 const App = (() => {
 
   /* ─── State ─── */
-  let vaultKey   = null;   // CryptoKey | null — cleared on lock
-  let entries    = [];     // PasswordEntry[]
-  let editingId  = null;   // string | null
-  let idleTimer  = null;
+  let vaultKey    = null;   // CryptoKey | null — cleared on lock
+  let entries     = [];     // PasswordEntry[]
+  let editingId   = null;   // string | null
+  let idleTimer   = null;
+  let pinInput    = '';     // current PIN digit buffer
+  let pinAttempts = 0;      // wrong PIN counter (max 3 before falling back to password)
 
-  const IDLE_MS = 5 * 60 * 1000; // 5 minutes
+  const IDLE_MS        = 5 * 60 * 1000;
+  const MAX_PIN_TRIES  = 3;
 
   /* ─── Entry colours ─── */
   const COLORS = [
@@ -24,13 +28,13 @@ const App = (() => {
     return COLORS[Math.abs(h) % COLORS.length];
   }
 
-  /* ─── Helpers ─── */
-  const $  = id => document.getElementById(id);
-  const show  = id => $(id).classList.remove('hidden');
-  const hide  = id => $(id).classList.add('hidden');
+  /* ─── DOM helpers ─── */
+  const $    = id => document.getElementById(id);
+  const show = id => $(id).classList.remove('hidden');
+  const hide = id => $(id).classList.add('hidden');
 
   function showScreen(name) {
-    ['screen-setup','screen-auth','screen-vault'].forEach(s => hide(s));
+    ['screen-setup', 'screen-auth', 'screen-vault'].forEach(s => hide(s));
     show('screen-' + name);
   }
 
@@ -57,9 +61,113 @@ const App = (() => {
     if (vaultKey) idleTimer = setTimeout(() => lock(), IDLE_MS);
   }
 
-  /* ─── Boot ─── */
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /* ─── THEME ─── */
+  function setTheme(name) {
+    document.documentElement.setAttribute('data-theme', name);
+    localStorage.setItem('passlock-theme', name);
+    document.querySelectorAll('.theme-swatch').forEach(s =>
+      s.classList.toggle('active', s.dataset.theme === name)
+    );
+  }
+
+  /* ─── TAB SWITCHING ─── */
+  function switchTab(name) {
+    ['passwords', 'files'].forEach(t => {
+      $(`tab-content-${t}`).classList.toggle('hidden', t !== name);
+      $(`tab-${t}`).classList.toggle('active', t === name);
+    });
+  }
+
+  /* ─── PIN DISPLAY ─── */
+  function updatePinDisplay() {
+    $('pin-display').textContent =
+      pinInput.length === 0 ? '○ ○ ○ ○' : '● '.repeat(pinInput.length).trim();
+  }
+
+  /* ─── PIN PAD ─── */
+  function pinDigit(d) {
+    if (pinInput.length >= 6) return;
+    pinInput += d;
+    updatePinDisplay();
+    clearError('pin-error');
+  }
+
+  function pinClear() {
+    pinInput = pinInput.slice(0, -1);
+    updatePinDisplay();
+  }
+
+  async function pinSubmit() {
+    if (pinInput.length < 4) {
+      setError('pin-error', 'PIN must be at least 4 digits.');
+      return;
+    }
+    showLoading('Unlocking…');
+    try {
+      const record      = await Storage.load();
+      const pinSalt     = Crypto.fromB64(record.pinSalt);
+      const pinWrapping = await Crypto.deriveWrappingKeyFromPin(pinInput, pinSalt);
+      const key         = await Crypto.unwrapVaultKey(record.pinWrappedKey, pinWrapping);
+      const loaded      = await Crypto.decrypt({ iv: record.vaultIv, data: record.vaultData }, key);
+
+      vaultKey    = key;
+      entries     = loaded;
+      pinInput    = '';
+      pinAttempts = 0;
+      updatePinDisplay();
+      showScreen('vault');
+      switchTab('passwords');
+      renderEntries();
+      resetIdle();
+    } catch {
+      pinAttempts++;
+      if (pinAttempts >= MAX_PIN_TRIES) {
+        pinInput    = '';
+        pinAttempts = 0;
+        updatePinDisplay();
+        showPasswordForm();
+        setError('auth-error', 'Too many incorrect PINs — enter your master password.');
+      } else {
+        setError('pin-error', `Incorrect PIN (${MAX_PIN_TRIES - pinAttempts} attempt(s) left).`);
+        pinInput = '';
+        updatePinDisplay();
+      }
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function showPasswordForm() {
+    hide('pin-section');
+    show('pw-section');
+    Storage.load().then(r => {
+      if (r?.pinWrappedKey) show('switch-to-pin');
+      else hide('switch-to-pin');
+    }).catch(() => hide('switch-to-pin'));
+    setTimeout(() => $('auth-pw').focus(), 100);
+  }
+
+  function showPinForm() {
+    pinInput = '';
+    updatePinDisplay();
+    clearError('pin-error');
+    show('pin-section');
+    hide('pw-section');
+  }
+
+  /* ─── BOOT ─── */
   async function init() {
-    // Wire up eye-toggle buttons
+    // Load saved theme
+    const savedTheme = localStorage.getItem('passlock-theme') || 'dark';
+    setTheme(savedTheme);
+
+    // Eye-toggle buttons
     document.querySelectorAll('.eye-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const target = document.getElementById(btn.dataset.for);
@@ -69,31 +177,54 @@ const App = (() => {
       });
     });
 
-    // Wire up Enter key on auth screen
+    // Enter-key shortcuts
     $('auth-pw').addEventListener('keydown', e => { if (e.key === 'Enter') unlock(); });
     $('setup-pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('setup-confirm').focus(); });
-    $('setup-confirm').addEventListener('keydown', e => { if (e.key === 'Enter') createVault(); });
+    $('setup-confirm').addEventListener('keydown', e => { if (e.key === 'Enter') $('setup-pin').focus(); });
 
-    // Reset idle on any interaction
+    // Idle reset
     document.addEventListener('pointerdown', resetIdle);
     document.addEventListener('keydown', resetIdle);
 
-    // Lock when tab is hidden
+    // Lock when tab hidden
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && vaultKey) {
         setTimeout(() => { if (document.hidden) lock(); }, IDLE_MS);
       }
     });
 
-    // Register service worker
+    // Service worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
 
     // Route to correct screen
     const hasVault = await Storage.exists();
-    showScreen(hasVault ? 'auth' : 'setup');
-    if (hasVault) setTimeout(() => $('auth-pw').focus(), 100);
+    if (!hasVault) {
+      showScreen('setup');
+      setTimeout(() => $('setup-pw').focus(), 100);
+      return;
+    }
+
+    showScreen('auth');
+    try {
+      const record = await Storage.load();
+      if (record?.pinWrappedKey) {
+        show('pin-section');
+        hide('pw-section');
+        updatePinDisplay();
+      } else {
+        hide('pin-section');
+        show('pw-section');
+        hide('switch-to-pin');
+        setTimeout(() => $('auth-pw').focus(), 100);
+      }
+    } catch {
+      hide('pin-section');
+      show('pw-section');
+      hide('switch-to-pin');
+      setTimeout(() => $('auth-pw').focus(), 100);
+    }
   }
 
   /* ─── CREATE VAULT (first time) ─── */
@@ -101,9 +232,11 @@ const App = (() => {
     clearError('setup-error');
     const pw  = $('setup-pw').value;
     const pw2 = $('setup-confirm').value;
+    const pin = $('setup-pin').value.trim();
 
-    if (pw.length < 8)   return setError('setup-error', 'Password must be at least 8 characters.');
-    if (pw !== pw2)      return setError('setup-error', 'Passwords do not match.');
+    if (pw.length < 8)                    return setError('setup-error', 'Password must be at least 8 characters.');
+    if (pw !== pw2)                        return setError('setup-error', 'Passwords do not match.');
+    if (pin && !/^\d{4,6}$/.test(pin))   return setError('setup-error', 'PIN must be 4–6 digits (or leave blank).');
 
     showLoading('Creating your vault…');
     try {
@@ -113,19 +246,30 @@ const App = (() => {
       const wrappedKey  = await Crypto.wrapVaultKey(newKey, wrappingKey);
       const { iv, data } = await Crypto.encrypt([], newKey);
 
-      await Storage.save({
-        version:    1,
-        salt:       Crypto.toB64(salt),
+      const record = {
+        version:   1,
+        salt:      Crypto.toB64(salt),
         wrappedKey,
-        vaultIv:    iv,
-        vaultData:  data,
-      });
+        vaultIv:   iv,
+        vaultData: data,
+      };
 
+      // Optional PIN
+      if (pin) {
+        const pSalt    = Crypto.randomBytes(32);
+        const pWrap    = await Crypto.deriveWrappingKeyFromPin(pin, pSalt);
+        record.pinSalt       = Crypto.toB64(pSalt);
+        record.pinWrappedKey = await Crypto.wrapVaultKey(newKey, pWrap);
+      }
+
+      await Storage.save(record);
       vaultKey = newKey;
       entries  = [];
-      $('setup-pw').value = '';
+      $('setup-pw').value      = '';
       $('setup-confirm').value = '';
+      $('setup-pin').value     = '';
       showScreen('vault');
+      switchTab('passwords');
       renderEntries();
       resetIdle();
     } catch (e) {
@@ -136,7 +280,7 @@ const App = (() => {
     }
   }
 
-  /* ─── UNLOCK ─── */
+  /* ─── UNLOCK (password) ─── */
   async function unlock() {
     clearError('auth-error');
     const pw = $('auth-pw').value;
@@ -148,14 +292,13 @@ const App = (() => {
       const salt        = Crypto.fromB64(record.salt);
       const wrappingKey = await Crypto.deriveWrappingKey(pw, salt);
       const key         = await Crypto.unwrapVaultKey(record.wrappedKey, wrappingKey);
-
-      // Decrypt entries to verify key is correct
-      const loaded = await Crypto.decrypt({ iv: record.vaultIv, data: record.vaultData }, key);
+      const loaded      = await Crypto.decrypt({ iv: record.vaultIv, data: record.vaultData }, key);
 
       vaultKey = key;
       entries  = loaded;
       $('auth-pw').value = '';
       showScreen('vault');
+      switchTab('passwords');
       renderEntries();
       resetIdle();
     } catch {
@@ -168,14 +311,35 @@ const App = (() => {
   }
 
   /* ─── LOCK ─── */
-  function lock() {
+  async function lock() {
     clearTimeout(idleTimer);
-    vaultKey = null;
-    entries  = [];
+    vaultKey    = null;
+    entries     = [];
+    pinInput    = '';
+    pinAttempts = 0;
     $('auth-pw').value = '';
     clearError('auth-error');
+    clearError('pin-error');
     showScreen('auth');
-    setTimeout(() => $('auth-pw').focus(), 100);
+
+    try {
+      const record = await Storage.load();
+      if (record?.pinWrappedKey) {
+        show('pin-section');
+        hide('pw-section');
+        updatePinDisplay();
+      } else {
+        hide('pin-section');
+        show('pw-section');
+        hide('switch-to-pin');
+        setTimeout(() => $('auth-pw').focus(), 100);
+      }
+    } catch {
+      hide('pin-section');
+      show('pw-section');
+      hide('switch-to-pin');
+      setTimeout(() => $('auth-pw').focus(), 100);
+    }
   }
 
   /* ─── RENDER ENTRIES ─── */
@@ -189,7 +353,6 @@ const App = (() => {
           (e.url || '').toLowerCase().includes(q))
       : entries;
 
-    // Sort alphabetically
     const sorted = [...filtered].sort((a, b) => a.title.localeCompare(b.title));
 
     list.innerHTML = '';
@@ -200,22 +363,20 @@ const App = (() => {
     hide('empty-state');
 
     sorted.forEach(entry => {
-      const card = document.createElement('div');
+      const card  = document.createElement('div');
       card.className = 'entry-card';
-
-      const initial = entry.title[0]?.toUpperCase() ?? '?';
-      const sub = entry.username || entry.url || '—';
       const color = entryColor(entry.title);
+      const sub   = entry.username || entry.url || '—';
 
       card.innerHTML = `
-        <div class="entry-initial" style="background:${color}">${initial}</div>
+        <div class="entry-initial" style="background:${color}">${escHtml(entry.title[0]?.toUpperCase() ?? '?')}</div>
         <div class="entry-info">
           <div class="entry-title">${escHtml(entry.title)}</div>
           <div class="entry-sub">${escHtml(sub)}</div>
         </div>
         <div class="entry-actions">
           <button class="entry-btn" title="Copy password" data-id="${entry.id}" data-action="copy">📋</button>
-          <button class="entry-btn" title="Edit" data-id="${entry.id}" data-action="edit">✏️</button>
+          <button class="entry-btn" title="Edit"          data-id="${entry.id}" data-action="edit">✏️</button>
           <button class="entry-btn danger" title="Delete" data-id="${entry.id}" data-action="delete">🗑</button>
         </div>`;
       list.appendChild(card);
@@ -231,12 +392,6 @@ const App = (() => {
     });
   }
 
-  function escHtml(s) {
-    return String(s)
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-  }
-
   function search(q) { renderEntries(q); }
 
   /* ─── COPY PASSWORD ─── */
@@ -245,11 +400,9 @@ const App = (() => {
     const entry = entries.find(e => e.id === id);
     if (!entry) return;
     navigator.clipboard.writeText(entry.password).then(() => {
-      toast(`Password copied — clears in 30 s`);
+      toast('Password copied — clears in 30 s');
       clearTimeout(clipTimer);
-      clipTimer = setTimeout(() => {
-        navigator.clipboard.writeText('').catch(() => {});
-      }, 30_000);
+      clipTimer = setTimeout(() => navigator.clipboard.writeText('').catch(() => {}), 30_000);
     }).catch(() => toast('Could not access clipboard'));
     resetIdle();
   }
@@ -258,11 +411,7 @@ const App = (() => {
   function openAddEntry() {
     editingId = null;
     $('entry-modal-title').textContent = 'Add Password';
-    ['e-title','e-username','e-password','e-url','e-notes'].forEach(id => {
-      const el = $(id);
-      if (el.tagName === 'TEXTAREA') el.value = '';
-      else el.value = '';
-    });
+    ['e-title', 'e-username', 'e-password', 'e-url', 'e-notes'].forEach(id => $(id).value = '');
     $('e-password').type = 'password';
     clearError('entry-error');
     show('modal-entry');
@@ -302,11 +451,7 @@ const App = (() => {
       const idx = entries.findIndex(e => e.id === editingId);
       if (idx >= 0) entries[idx] = { ...entries[idx], title, username, password, url, notes, updatedAt: now };
     } else {
-      entries.push({
-        id: crypto.randomUUID(),
-        title, username, password, url, notes,
-        createdAt: now, updatedAt: now,
-      });
+      entries.push({ id: crypto.randomUUID(), title, username, password, url, notes, createdAt: now, updatedAt: now });
     }
 
     await persistEntries();
@@ -344,14 +489,89 @@ const App = (() => {
   }
 
   /* ─── SETTINGS ─── */
-  function showSettings() {
-    ['s-current','s-new','s-confirm'].forEach(id => $(id).value = '');
+  async function showSettings() {
+    ['s-current', 's-new', 's-confirm'].forEach(id => $(id).value = '');
+    $('new-pin').value     = '';
+    $('confirm-pin').value = '';
     clearError('settings-error');
+    clearError('pin-setup-error');
+    hide('pin-setup-form');
+    show('pin-action-btns');
+    await updatePinStatus();
+    const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    document.querySelectorAll('.theme-swatch').forEach(s =>
+      s.classList.toggle('active', s.dataset.theme === theme)
+    );
     show('modal-settings');
   }
 
   function closeSettings() { hide('modal-settings'); }
 
+  /* ─── PIN SETTINGS ─── */
+  async function updatePinStatus() {
+    try {
+      const record  = await Storage.load();
+      const hasPin  = !!(record?.pinWrappedKey);
+      $('pin-status-text').textContent   = hasPin ? 'PIN unlock is currently ON.' : 'PIN unlock is OFF.';
+      $('btn-toggle-pin').textContent    = hasPin ? 'Remove PIN' : 'Set PIN';
+    } catch { /* ignore */ }
+  }
+
+  async function togglePinSetup() {
+    const record = await Storage.load().catch(() => null);
+    if (record?.pinWrappedKey) {
+      if (!confirm('Remove PIN unlock from this vault?')) return;
+      const { pinSalt: _ps, pinWrappedKey: _pk, ...rest } = record;
+      await Storage.save(rest);
+      await updatePinStatus();
+      toast('PIN removed');
+    } else {
+      $('new-pin').value     = '';
+      $('confirm-pin').value = '';
+      clearError('pin-setup-error');
+      show('pin-setup-form');
+      hide('pin-action-btns');
+    }
+  }
+
+  async function savePin() {
+    clearError('pin-setup-error');
+    const pin     = $('new-pin').value.trim();
+    const confirm = $('confirm-pin').value.trim();
+
+    if (!/^\d{4,6}$/.test(pin))  return setError('pin-setup-error', 'PIN must be 4–6 digits.');
+    if (pin !== confirm)          return setError('pin-setup-error', 'PINs do not match.');
+
+    showLoading('Saving PIN…');
+    try {
+      const record  = await Storage.load();
+      const pSalt   = Crypto.randomBytes(32);
+      const pWrap   = await Crypto.deriveWrappingKeyFromPin(pin, pSalt);
+      const pWrapped = await Crypto.wrapVaultKey(vaultKey, pWrap);
+
+      await Storage.save({ ...record, pinSalt: Crypto.toB64(pSalt), pinWrappedKey: pWrapped });
+
+      $('new-pin').value     = '';
+      $('confirm-pin').value = '';
+      hide('pin-setup-form');
+      show('pin-action-btns');
+      await updatePinStatus();
+      toast('PIN set! You can now use it to unlock.');
+    } catch (e) {
+      setError('pin-setup-error', 'Failed to save PIN. Try again.');
+      console.error(e);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function cancelPinSetup() {
+    hide('pin-setup-form');
+    show('pin-action-btns');
+    clearError('pin-setup-error');
+  }
+
+  /* ─── CHANGE PASSWORD ─── */
   async function changePassword() {
     clearError('settings-error');
     const current = $('s-current').value;
@@ -364,22 +584,22 @@ const App = (() => {
 
     showLoading('Changing password…');
     try {
-      // Verify current password
       const record      = await Storage.load();
       const salt        = Crypto.fromB64(record.salt);
       const oldWrapping = await Crypto.deriveWrappingKey(current, salt);
       await Crypto.unwrapVaultKey(record.wrappedKey, oldWrapping); // throws if wrong
 
-      // Re-wrap vault key with new password
       const newSalt     = Crypto.randomBytes(32);
       const newWrapping = await Crypto.deriveWrappingKey(pw, newSalt);
       const wrappedKey  = await Crypto.wrapVaultKey(vaultKey, newWrapping);
 
       await Storage.save({ ...record, salt: Crypto.toB64(newSalt), wrappedKey });
+      ['s-current', 's-new', 's-confirm'].forEach(id => $(id).value = '');
       closeSettings();
       toast('Password changed successfully!');
     } catch (e) {
-      if (e?.message?.includes('unwrap') || String(e).includes('OperationError')) {
+      const msg = String(e);
+      if (msg.includes('OperationError') || msg.includes('unwrap')) {
         setError('settings-error', 'Current password is incorrect.');
       } else {
         setError('settings-error', 'Failed to change password. Try again.');
@@ -390,6 +610,84 @@ const App = (() => {
     }
   }
 
+  /* ─── FILE VAULT — ENCRYPT ─── */
+  async function lockFiles(input) {
+    const files = Array.from(input.files);
+    if (!files.length) return;
+    input.value = '';
+    if (!vaultKey) { toast('Vault is locked — please unlock first.'); return; }
+
+    show('file-progress');
+    try {
+      const fileData = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        $('file-progress-msg').textContent = `Encrypting ${i + 1}/${files.length}: ${f.name}…`;
+        const buf        = await f.arrayBuffer();
+        const { iv, data } = await Crypto.encryptBytes(buf, vaultKey);
+        fileData.push({ name: f.name, type: f.type || 'application/octet-stream', size: f.size, iv, data });
+      }
+
+      const vault = JSON.stringify({ version: 1, type: 'passlock-vault', files: fileData });
+      const blob  = new Blob([vault], { type: 'application/octet-stream' });
+      const url   = URL.createObjectURL(blob);
+      const date  = new Date().toISOString().split('T')[0];
+
+      const a = document.createElement('a');
+      a.href = url; a.download = `files-${date}.vault`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast(`${files.length} file(s) encrypted → files-${date}.vault`, 3500);
+    } catch (e) {
+      toast('Encryption failed: ' + e.message);
+      console.error(e);
+    } finally {
+      hide('file-progress');
+      $('file-progress-msg').textContent = 'Working…';
+    }
+  }
+
+  /* ─── FILE VAULT — DECRYPT ─── */
+  async function unlockFiles(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+    if (!vaultKey) { toast('Vault is locked — please unlock first.'); return; }
+
+    show('file-progress');
+    try {
+      const text  = await file.text();
+      const vault = JSON.parse(text);
+
+      if (vault.type !== 'passlock-vault' || !Array.isArray(vault.files)) {
+        throw new Error('Not a valid .vault file created by Passlock.');
+      }
+
+      for (let i = 0; i < vault.files.length; i++) {
+        const f = vault.files[i];
+        $('file-progress-msg').textContent = `Decrypting ${i + 1}/${vault.files.length}: ${f.name}…`;
+        const buf  = await Crypto.decryptBytes(f.iv, f.data, vaultKey);
+        const blob = new Blob([buf], { type: f.type });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = f.name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        // brief pause between downloads so browser doesn't block them
+        if (vault.files.length > 1) await new Promise(r => setTimeout(r, 150));
+      }
+
+      toast(`${vault.files.length} file(s) decrypted!`, 3000);
+    } catch (e) {
+      toast('Decryption failed: ' + e.message);
+      console.error(e);
+    } finally {
+      hide('file-progress');
+      $('file-progress-msg').textContent = 'Working…';
+    }
+  }
+
   /* ─── EXPORT BACKUP ─── */
   async function exportBackup() {
     showLoading('Preparing backup…');
@@ -397,10 +695,9 @@ const App = (() => {
       const record = await Storage.load();
       if (!record) { toast('No vault to export.'); return; }
 
-      // Strip IndexedDB internal key before export
       const { id: _id, ...exportData } = record;
-      exportData.exportedAt  = new Date().toISOString();
-      exportData.appVersion  = 1;
+      exportData.exportedAt = new Date().toISOString();
+      exportData.appVersion = 1;
 
       const json = JSON.stringify(exportData, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
@@ -408,25 +705,22 @@ const App = (() => {
       const date = new Date().toISOString().split('T')[0];
 
       const a = document.createElement('a');
-      a.href     = url;
-      a.download = `passlock-backup-${date}.passlock`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      a.href = url; a.download = `passlock-backup-${date}.passlock`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast('Backup downloaded! Save it somewhere safe.', 3500);
+      toast('Backup downloaded! Store it somewhere safe.', 3500);
     } finally {
       hideLoading();
     }
   }
 
   /* ─── IMPORT HELPERS ─── */
-  function validateBackupRecord(record) {
-    if (!record || typeof record !== 'object')           throw new Error('Not a valid backup file.');
-    if (!record.version || !record.salt)                throw new Error('Missing vault metadata.');
-    if (!record.wrappedKey)                              throw new Error('Missing encryption key data.');
-    if (!record.vaultIv || !record.vaultData)           throw new Error('Missing encrypted vault data.');
+  function validateBackupRecord(r) {
+    if (!r || typeof r !== 'object')     throw new Error('Not a valid backup file.');
+    if (!r.version || !r.salt)           throw new Error('Missing vault metadata.');
+    if (!r.wrappedKey)                   throw new Error('Missing encryption key data.');
+    if (!r.vaultIv || !r.vaultData)     throw new Error('Missing encrypted vault data.');
   }
 
   async function readFileAsJSON(file) {
@@ -443,19 +737,15 @@ const App = (() => {
     return { key, entries: loaded };
   }
 
-  /* ─── IMPORT FROM AUTH SCREEN (no existing vault) ─── */
+  /* ─── IMPORT FROM AUTH SCREEN ─── */
   async function importFromAuth(input) {
     const file = input.files[0];
     if (!file) return;
     input.value = '';
 
     let record;
-    try {
-      record = await readFileAsJSON(file);
-      validateBackupRecord(record);
-    } catch (e) {
-      alert(e.message); return;
-    }
+    try { record = await readFileAsJSON(file); validateBackupRecord(record); }
+    catch (e) { alert(e.message); return; }
 
     const pw = prompt('Enter the master password for this backup:');
     if (!pw) return;
@@ -463,12 +753,12 @@ const App = (() => {
     showLoading('Restoring backup…');
     try {
       const { key, entries: loaded } = await verifyAndLoad(record, pw);
-      // Save backup as the new vault
       const { id: _id, exportedAt: _e, appVersion: _a, ...vaultRecord } = record;
       await Storage.save(vaultRecord);
       vaultKey = key;
       entries  = loaded;
       showScreen('vault');
+      switchTab('passwords');
       renderEntries();
       resetIdle();
       toast(`Restored ${loaded.length} password(s) from backup!`, 3000);
@@ -479,24 +769,19 @@ const App = (() => {
     }
   }
 
-  /* ─── IMPORT FROM SETTINGS (overwrite existing vault) ─── */
+  /* ─── IMPORT FROM SETTINGS ─── */
   async function importFromSettings(input) {
     const file = input.files[0];
     if (!file) return;
     input.value = '';
 
     let record;
-    try {
-      record = await readFileAsJSON(file);
-      validateBackupRecord(record);
-    } catch (e) {
-      setError('settings-error', e.message); return;
-    }
+    try { record = await readFileAsJSON(file); validateBackupRecord(record); }
+    catch (e) { setError('settings-error', e.message); return; }
 
     const pw = prompt('Enter the master password for this backup to verify it:');
     if (!pw) return;
-
-    if (!confirm('This will REPLACE your current vault with the backup. Are you sure?')) return;
+    if (!confirm('This will REPLACE your current vault with the backup. Continue?')) return;
 
     showLoading('Restoring backup…');
     try {
@@ -523,5 +808,11 @@ const App = (() => {
     openAddEntry, closeEntry, saveEntry, fillGeneratedPassword,
     showSettings, closeSettings, changePassword,
     exportBackup, importFromAuth, importFromSettings,
+    // PIN
+    pinDigit, pinClear, pinSubmit, showPasswordForm, showPinForm,
+    // Settings extras
+    setTheme, togglePinSetup, savePin, cancelPinSetup,
+    // Tab + file vault
+    switchTab, lockFiles, unlockFiles,
   };
 })();
