@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Passlock</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#5B67CA">
+
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Passlock">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ═══════════════════ TOAST ═══════════════════ -->
+<div id="toast" class="toast"></div>
+
+<!-- ═══════════════════ SCREEN: SETUP ═══════════════════ -->
+<div id="screen-setup" class="screen">
+  <div class="screen-inner">
+    <div class="logo-wrap">
+      <span class="logo-icon">🔒</span>
+      <h1 class="app-name">Passlock</h1>
+      <p class="tagline">Your offline password vault</p>
+    </div>
+
+    <div class="card">
+      <p class="card-hint">
+        Choose a strong master password. It encrypts everything — if you forget it, your data
+        <strong>cannot be recovered</strong>.
+      </p>
+
+      <div class="field-group">
+        <label for="setup-pw">Master Password <span class="req">*</span></label>
+        <div class="input-row">
+          <input type="password" id="setup-pw" placeholder="At least 8 characters" autocomplete="new-password">
+          <button class="eye-btn" data-for="setup-pw" title="Show/hide">👁</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="setup-confirm">Confirm Password <span class="req">*</span></label>
+        <div class="input-row">
+          <input type="password" id="setup-confirm" placeholder="Repeat password" autocomplete="new-password">
+        </div>
+      </div>
+
+      <div id="setup-error" class="error-msg"></div>
+
+      <button id="setup-btn" class="btn-primary" onclick="App.createVault()">
+        Create Vault
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SCREEN: AUTH ═══════════════════ -->
+<div id="screen-auth" class="screen hidden">
+  <div class="screen-inner">
+    <div class="logo-wrap">
+      <span class="logo-icon">🔒</span>
+      <h1 class="app-name">Passlock</h1>
+      <p class="tagline">Enter your master password to unlock</p>
+    </div>
+
+    <div class="card">
+      <div class="field-group">
+        <label for="auth-pw">Master Password</label>
+        <div class="input-row">
+          <input type="password" id="auth-pw" placeholder="Your password" autocomplete="current-password">
+          <button class="eye-btn" data-for="auth-pw" title="Show/hide">👁</button>
+        </div>
+      </div>
+
+      <div id="auth-error" class="error-msg"></div>
+
+      <button id="auth-btn" class="btn-primary" onclick="App.unlock()">
+        Unlock Vault
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SCREEN: VAULT ═══════════════════ -->
+<div id="screen-vault" class="screen hidden">
+
+  <header class="vault-header">
+    <span class="vault-title">🔒 Passlock</span>
+    <div class="header-btns">
+      <button class="hdr-btn" onclick="App.showSettings()" title="Settings">⚙️</button>
+      <button class="hdr-btn" onclick="App.lock()" title="Lock vault">🔐</button>
+    </div>
+  </header>
+
+  <div class="search-wrap">
+    <input type="search" id="search" placeholder="Search passwords…" oninput="App.search(this.value)">
+  </div>
+
+  <div id="entry-list" class="entry-list"></div>
+
+  <div id="empty-state" class="empty-state hidden">
+    <span class="empty-icon">🔑</span>
+    <p>Your vault is empty</p>
+    <p class="empty-sub">Tap + to add your first password</p>
+  </div>
+
+  <button class="fab" onclick="App.openAddEntry()" title="Add password">+</button>
+
+</div>
+
+<!-- ═══════════════════ MODAL: ADD / EDIT ENTRY ═══════════════════ -->
+<div id="modal-entry" class="modal hidden">
+  <div class="modal-backdrop" onclick="App.closeEntry()"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-head">
+      <h2 id="entry-modal-title">Add Password</h2>
+      <button class="close-btn" onclick="App.closeEntry()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label for="e-title">Title <span class="req">*</span></label>
+        <input type="text" id="e-title" placeholder="e.g. Google" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="e-username">Username / Email</label>
+        <input type="text" id="e-username" placeholder="user@example.com" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="e-password">Password <span class="req">*</span></label>
+        <div class="input-row">
+          <input type="password" id="e-password" placeholder="Password" autocomplete="new-password">
+          <button class="eye-btn" data-for="e-password">👁</button>
+        </div>
+        <button class="btn-outline small" onclick="App.fillGeneratedPassword()" style="margin-top:8px">
+          ⚡ Generate Strong Password
+        </button>
+      </div>
+      <div class="field-group">
+        <label for="e-url">Website URL</label>
+        <input type="url" id="e-url" placeholder="https://example.com">
+      </div>
+      <div class="field-group">
+        <label for="e-notes">Notes</label>
+        <textarea id="e-notes" placeholder="Optional notes…" rows="3"></textarea>
+      </div>
+      <div id="entry-error" class="error-msg"></div>
+      <button class="btn-primary" onclick="App.saveEntry()">Save Entry</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ MODAL: SETTINGS ═══════════════════ -->
+<div id="modal-settings" class="modal hidden">
+  <div class="modal-backdrop" onclick="App.closeSettings()"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-head">
+      <h2>Settings</h2>
+      <button class="close-btn" onclick="App.closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <h3>Change Master Password</h3>
+        <div class="field-group">
+          <label for="s-current">Current Password</label>
+          <input type="password" id="s-current" autocomplete="current-password">
+        </div>
+        <div class="field-group">
+          <label for="s-new">New Password (min 8 chars)</label>
+          <input type="password" id="s-new" autocomplete="new-password">
+        </div>
+        <div class="field-group">
+          <label for="s-confirm">Confirm New Password</label>
+          <input type="password" id="s-confirm" autocomplete="new-password">
+        </div>
+        <div id="settings-error" class="error-msg"></div>
+        <button class="btn-primary" onclick="App.changePassword()">Change Password</button>
+      </div>
+
+      <div class="info-card">
+        <h3>🛡️ Security Info</h3>
+        <ul class="info-list">
+          <li>AES-256-GCM encryption</li>
+          <li>PBKDF2 key derivation (310,000 rounds)</li>
+          <li>100% offline — zero network requests</li>
+          <li>Data stored only on this device</li>
+          <li>Auto-locks after 5 min idle</li>
+          <li>Clipboard clears after 30 seconds</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ LOADING OVERLAY ═══════════════════ -->
+<div id="loading" class="loading-overlay hidden">
+  <div class="spinner"></div>
+  <p id="loading-msg">Working…</p>
+</div>
+
+<script src="js/crypto.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
