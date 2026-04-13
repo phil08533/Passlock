@@ -9,7 +9,7 @@ import javax.crypto.SecretKey
 class PasslockApp : Application() {
 
     /** Vault key held in memory only while app is unlocked. */
-    var vaultKey: SecretKey? = null
+    @Volatile var vaultKey: SecretKey? = null
 
     private var backgroundedAt: Long = 0L
     private val AUTO_LOCK_MS = 60_000L // 1 minute

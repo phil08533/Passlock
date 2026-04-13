@@ -4,10 +4,12 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +28,8 @@ class VaultActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Prevent screenshots and recent-apps thumbnail from showing vault contents
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         binding = ActivityVaultBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -110,7 +114,16 @@ class VaultActivity : AppCompatActivity() {
     private fun copyPassword(entry: PasswordEntry) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("password", entry.password))
-        Toast.makeText(this, "Password copied for ${entry.title}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Password copied — clears in 30s", Toast.LENGTH_SHORT).show()
+
+        // Auto-clear clipboard after 30 seconds
+        binding.root.postDelayed({
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                cm.clearPrimaryClip()
+            } else {
+                cm.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
+        }, 30_000)
     }
 
     private fun confirmDelete(entry: PasswordEntry) {
