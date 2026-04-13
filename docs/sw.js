@@ -1,5 +1,5 @@
 /* Passlock Service Worker — offline-first cache */
-const CACHE = 'passlock-v2';
+const CACHE = 'passlock-v3';
 const ASSETS = [
   './',
   './index.html',
